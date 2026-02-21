@@ -1,0 +1,848 @@
+import { useState, useEffect, useCallback } from 'react';
+import { ethers } from 'ethers';
+import {
+    ShieldCheck,
+    Lock,
+    Zap,
+    DollarSign,
+    Percent,
+    Gavel,
+    Briefcase,
+    User,
+    CheckCircle2,
+    XCircle,
+    Loader2,
+    Wallet,
+    ArrowUpRight,
+    AlertTriangle,
+    RefreshCw,
+    Users,
+    FileText,
+    Paperclip,
+    Eye,
+    Download,
+    X,
+    MessageCircle,
+    History,
+} from 'lucide-react';
+import abi from './abi.json';
+import './AdminDashboard.css';
+
+const SEPOLIA_CHAIN_ID = '0xaa36a7';
+const DEFAULT_CONTRACT = '0x67D11D4d6A2031409Ddd7AFa6e36b4C2E1CAf2bD';
+
+interface EIP6963ProviderDetail {
+    info: { uuid: string; name: string; icon: string; rdns: string };
+    provider: any;
+}
+
+interface Escrow {
+    escrowId: number;
+    employer: string;
+    employee: string;
+    jobDesc: string;
+    amount: string;
+    status: number;
+    timestamp: number;
+}
+
+interface Toast {
+    id: number;
+    message: string;
+    type: 'success' | 'error';
+}
+
+function shortAddr(addr: string): string {
+    return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function parseError(err: any): string {
+    if (err?.revert?.args?.[0]) return err.revert.args[0];
+    if (err?.reason && err.reason !== 'require(false)' && err.reason !== 'unknown') return err.reason;
+    if (err?.info?.error?.message) return err.info.error.message;
+    if (err?.shortMessage && !err.shortMessage.includes('require(false)')) return err.shortMessage;
+    if (err?.data && typeof err.data === 'string' && err.data.startsWith('0x08c379a0')) {
+        try {
+            const decoded = ethers.AbiCoder.defaultAbiCoder().decode(['string'], '0x' + err.data.slice(10));
+            if (decoded[0]) return decoded[0];
+        } catch { /* ignore */ }
+    }
+    return err?.message || 'Transaction failed';
+}
+
+export default function AdminDashboard() {
+    const [providers, setProviders] = useState<EIP6963ProviderDetail[]>([]);
+    const [account, setAccount] = useState('');
+    const [chainId, setChainId] = useState('');
+    const [showWallets, setShowWallets] = useState(false);
+
+    const contractAddress = localStorage.getItem('escrow_contract') || DEFAULT_CONTRACT;
+    const [contract, setContract] = useState<ethers.Contract | null>(null);
+
+    const [owner, setOwner] = useState('');
+    const [isPaused, setIsPaused] = useState(false);
+    const [escrowCount, setEscrowCount] = useState(0);
+    const [platformEarnings, setPlatformEarnings] = useState('0');
+    const [platformFee, setPlatformFee] = useState('5');
+
+    const [disputedEscrows, setDisputedEscrows] = useState<Escrow[]>([]);
+    const [resolvedEscrows, setResolvedEscrows] = useState<Escrow[]>([]);
+    const [showResolvedHistory, setShowResolvedHistory] = useState(false);
+    const [newFee, setNewFee] = useState('');
+    const [newOwner, setNewOwner] = useState('');
+
+    const [loading, setLoading] = useState(false);
+    const [txLoading, setTxLoading] = useState(false);
+    const [toasts, setToasts] = useState<Toast[]>([]);
+    const [confirmReleaseId, setConfirmReleaseId] = useState<number | null>(null);
+    const [lightboxImg, setLightboxImg] = useState<string | null>(null);
+
+    const isSepolia = chainId === SEPOLIA_CHAIN_ID;
+    const isOwner = account && owner && account.toLowerCase() === owner.toLowerCase();
+
+    const addToast = (message: string, type: 'success' | 'error') => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, message, type }]);
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4500);
+    };
+
+    // Wallet Discovery
+    useEffect(() => {
+        const onAnnouncement = (event: any) => {
+            setProviders(prev =>
+                prev.find(p => p.info.uuid === event.detail.info.uuid) ? prev : [...prev, event.detail]
+            );
+        };
+        window.addEventListener('eip6963:announceProvider', onAnnouncement);
+        window.dispatchEvent(new Event('eip6963:requestProvider'));
+        return () => window.removeEventListener('eip6963:announceProvider', onAnnouncement);
+    }, []);
+
+    const connectToWallet = async (detail: EIP6963ProviderDetail) => {
+        try {
+            setLoading(true);
+            const accounts = await detail.provider.request({ method: 'eth_requestAccounts' });
+            const network = await detail.provider.request({ method: 'eth_chainId' });
+            const bp = new ethers.BrowserProvider(detail.provider);
+            const signer = await bp.getSigner();
+
+            setAccount(accounts[0]);
+            setChainId(network);
+            setContract(new ethers.Contract(contractAddress, abi, signer));
+            setShowWallets(false);
+            addToast('Wallet connected', 'success');
+
+            detail.provider.on('accountsChanged', async (accs: string[]) => {
+                setAccount(accs[0] || '');
+                if (accs[0]) {
+                    const newBp = new ethers.BrowserProvider(detail.provider);
+                    const s = await newBp.getSigner();
+                    setContract(new ethers.Contract(contractAddress, abi, s));
+                } else {
+                    setContract(null);
+                }
+            });
+            detail.provider.on('chainChanged', async (cid: string) => {
+                setChainId(cid);
+                const newBp = new ethers.BrowserProvider(detail.provider);
+                const s = await newBp.getSigner();
+                setContract(new ethers.Contract(contractAddress, abi, s));
+            });
+        } catch (err: any) {
+            addToast(err.message || 'Connection failed', 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Load contract config
+    const loadContractData = useCallback(async () => {
+        if (!contract) return;
+        try {
+            const [o, p, fee, count] = await Promise.all([
+                contract.owner().catch(() => ''),
+                contract.isItPaused().catch(() => false),
+                contract.platformFee().catch(() => 5n),
+                contract.escrowCounter().catch(() => 0n),
+            ]);
+            setOwner(o);
+            setIsPaused(p);
+            setPlatformFee(fee.toString());
+            setEscrowCount(Number(count));
+
+            // platformEarnings tracks ONLY fees from completed tasks, not escrowed funds
+            try {
+                const earnings = await contract.platformEarnings();
+                console.log('[Admin] platformEarnings =', earnings.toString());
+                setPlatformEarnings(ethers.formatEther(earnings));
+            } catch (earningsErr) {
+                console.warn('[Admin] platformEarnings() call failed:', earningsErr);
+                setPlatformEarnings('0');
+            }
+        } catch (e) {
+            console.error('Config load failed', e);
+        }
+    }, [contract]);
+
+    // Load all escrows, filter for disputed ones
+    const [disputeLoadError, setDisputeLoadError] = useState('');
+
+    const loadDisputedEscrows = useCallback(async () => {
+        if (!contract) return;
+        setLoading(true);
+        setDisputeLoadError('');
+        try {
+            // Try escrowCounter first, but probe anyway if it returns 0
+            let count = Number(await contract.escrowCounter().catch(() => 0n));
+            console.log('[Admin] escrowCounter =', count);
+
+            // If counter is 0, probe up to 50 IDs to check if escrows exist anyway
+            const maxProbe = count > 0 ? count : 50;
+            const ids = Array.from({ length: maxProbe }, (_, i) => i + 1);
+
+            const results = await Promise.all(
+                ids.map(async (id) => {
+                    // Try Escrow() mapping first (no isPaused), fallback to getEscrow()
+                    for (const method of ['Escrow', 'getEscrow'] as const) {
+                        try {
+                            const fn = (contract as any)[method];
+                            if (!fn) continue;
+                            const d = await fn(id);
+                            // Check if this is a real escrow (employer not zero address)
+                            const employer = d[1] || d.employer;
+                            if (!employer || employer === '0x0000000000000000000000000000000000000000') return null;
+                            console.log(`[Admin] ${method}(${id}) status=${Number(d[5] ?? d.status)}`);
+                            return {
+                                escrowId: Number(d[0] ?? d.escrowId) || id,
+                                employer: d[1] || d.employer,
+                                employee: d[2] || d.employee,
+                                jobDesc: d[3] || d.jobDesc || '',
+                                amount: ethers.formatEther(d[4] ?? d.amount ?? 0n),
+                                status: Number(d[5] ?? d.status),
+                                timestamp: Number(d[6] ?? d.timestamp ?? 0),
+                            };
+                        } catch {
+                            continue;
+                        }
+                    }
+                    return null;
+                })
+            );
+
+            const validResults = results.filter(r => r !== null);
+            console.log('[Admin] Valid escrows found:', validResults.length, validResults.map(r => r && { id: r.escrowId, status: r.status }));
+
+            if (validResults.length === 0 && count === 0) {
+                setDisputeLoadError('');
+            }
+
+            const disputed = validResults.filter((e): e is Escrow => e !== null && e.status === 3);
+            console.log('[Admin] Disputed:', disputed.length);
+            setDisputedEscrows(disputed);
+
+            // Resolved disputes: Released or Cancelled that had a dispute reason
+            const resolved = validResults.filter((e): e is Escrow =>
+                e !== null && (e.status === 4 || e.status === 5) &&
+                !!localStorage.getItem(`dispute_reason_${e.escrowId}`)
+            );
+            console.log('[Admin] Resolved disputes:', resolved.length);
+            setResolvedEscrows(resolved);
+        } catch (err) {
+            console.error('Disputed escrow load failed', err);
+            setDisputeLoadError('Failed to load escrow data.');
+        } finally {
+            setLoading(false);
+        }
+    }, [contract]);
+
+    useEffect(() => {
+        if (contract) {
+            loadContractData();
+            loadDisputedEscrows();
+        }
+    }, [contract, loadContractData, loadDisputedEscrows]);
+
+    const executeAction = async (action: string, args?: any) => {
+        if (!contract) return;
+        try {
+            setTxLoading(true);
+            let tx;
+            if (action === 'pause') tx = await contract.Pause();
+            if (action === 'unPause') tx = await contract.unPause();
+            if (action === 'withdrawPlatformFee') tx = await contract.withdrawPlatformFee();
+            if (action === 'changeFee') tx = await contract.changeFee(args.newFee);
+            if (action === 'resolve') tx = await contract.resolveDispute(args.escrowId, args.toFreelancer);
+            if (action === 'transferOwnership') tx = await contract.transferOwnership(args.newOwner);
+
+            if (tx) {
+                await tx.wait();
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+
+            // For pause/unPause/changeFee, we know the exact resulting state — force it
+            // to avoid stale RPC reads overriding the correct value
+            if (action === 'pause') {
+                setIsPaused(true);
+                await loadContractData();
+                // Force again in case loadContractData overwrote with stale data
+                setIsPaused(true);
+            } else if (action === 'unPause') {
+                setIsPaused(false);
+                await loadContractData();
+                setIsPaused(false);
+                await loadDisputedEscrows();
+            } else if (action === 'changeFee') {
+                setPlatformFee(args.newFee.toString());
+                await loadContractData();
+                setPlatformFee(args.newFee.toString());
+                await loadDisputedEscrows();
+            } else {
+                await loadContractData();
+                await loadDisputedEscrows();
+            }
+            addToast(`Action "${action}" completed!`, 'success');
+        } catch (err: any) {
+            console.error(`Action "${action}" error:`, err);
+            addToast(parseError(err), 'error');
+        } finally {
+            setTxLoading(false);
+        }
+    };
+
+    // ─── TOAST ───
+    const renderToasts = () => (
+        <div className="admin-toast-container">
+            {toasts.map(t => (
+                <div key={t.id} className={`admin-toast toast-${t.type}`}>
+                    {t.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+                    {t.message}
+                </div>
+            ))}
+        </div>
+    );
+
+    // ─── NOT CONNECTED ───
+    if (!account) {
+        return (
+            <div className="admin-layout">
+                {renderToasts()}
+                <div className="admin-connect">
+                    <ShieldCheck size={56} />
+                    <h2>TrustFlow Admin</h2>
+                    <p>Connect the contract owner wallet to access the admin dashboard.</p>
+                    {!showWallets ? (
+                        <button className="admin-connect-btn" onClick={() => setShowWallets(true)}>
+                            <Wallet size={16} /> Connect Wallet
+                        </button>
+                    ) : (
+                        <div className="admin-wallet-list">
+                            {providers.length === 0 && (
+                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                    No wallets detected. Install MetaMask or another EIP-6963 wallet.
+                                </p>
+                            )}
+                            {providers.map(p => (
+                                <button key={p.info.uuid} className="admin-wallet-item" onClick={() => connectToWallet(p)}>
+                                    <img src={p.info.icon} alt={p.info.name} />
+                                    <span>{p.info.name}</span>
+                                    <ArrowUpRight size={14} className="wallet-arrow" />
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    // ─── ACCESS DENIED ───
+    if (!isOwner && owner) {
+        return (
+            <div className="admin-layout">
+                {renderToasts()}
+                <div className="admin-denied">
+                    <AlertTriangle size={56} />
+                    <h2>Access Denied</h2>
+                    <p>This wallet is not the contract owner. Only the owner can access the admin dashboard.</p>
+                    <div className="addr-display">Connected: {shortAddr(account)}</div>
+                </div>
+            </div>
+        );
+    }
+
+    // ─── ADMIN DASHBOARD ───
+    return (
+        <div className="admin-layout">
+            {txLoading && (
+                <div className="admin-loading-overlay">
+                    <div className="admin-loading-spinner" />
+                </div>
+            )}
+            {renderToasts()}
+
+            {/* ─── TOP BAR ─── */}
+            <header className="admin-topbar">
+                <div className="admin-brand">
+                    <ShieldCheck size={28} />
+                    <h1>TrustFlow</h1>
+                    <span className="admin-tag">Admin</span>
+                </div>
+                <div className="admin-topbar-right">
+                    <button
+                        className={`refresh-btn ${loading ? 'spinning' : ''}`}
+                        onClick={() => { loadContractData(); loadDisputedEscrows(); }}
+                        title="Refresh data"
+                        style={{ background: 'var(--bg-glass)', border: '1px solid var(--border)', color: 'var(--text-secondary)', padding: '0.45rem', borderRadius: 'var(--radius-sm)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                    >
+                        <RefreshCw size={16} />
+                    </button>
+                    <div className={`net-badge ${isSepolia ? 'ok' : 'warn'}`}
+                        style={{
+                            padding: '0.4rem 1rem', borderRadius: 'var(--radius-full)', fontSize: '0.8rem', fontWeight: 600,
+                            background: isSepolia ? 'var(--success-bg)' : 'var(--danger-bg)',
+                            color: isSepolia ? 'var(--success)' : 'var(--danger)',
+                            border: `1px solid ${isSepolia ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`
+                        }}>
+                        {isSepolia ? '◉ Sepolia' : '⚠ Wrong Network'}
+                    </div>
+                    <span className="admin-addr">{shortAddr(account)}</span>
+                </div>
+            </header>
+
+            {/* ─── BODY ─── */}
+            <div className="admin-body">
+
+                {/* Stats Grid */}
+                <div className="admin-stats-grid">
+                    {/* Platform Status */}
+                    <div className="admin-stat-card">
+                        <div className="stat-header">
+                            <h4>Platform Status</h4>
+                            <div className={`stat-icon status-icon ${!isPaused ? 'active-icon' : ''}`}>
+                                {isPaused ? <Lock size={18} /> : <Zap size={18} />}
+                            </div>
+                        </div>
+                        <div className="platform-status">
+                            <div className={`dot ${isPaused ? 'paused' : 'active'}`} />
+                            <span className={`status-text ${isPaused ? 'paused' : 'active'}`}>
+                                {isPaused ? 'PAUSED' : 'ACTIVE'}
+                            </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
+                            <button
+                                style={{
+                                    flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                    gap: '0.5rem', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: 'none',
+                                    fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', fontFamily: 'inherit',
+                                    transition: 'all 0.25s var(--ease)', color: 'white',
+                                    background: '#ef4444',
+                                    opacity: isPaused ? 0.4 : 1,
+                                }}
+                                disabled={isPaused}
+                                onClick={() => executeAction('pause')}
+                            >
+                                <Lock size={14} /> Pause
+                            </button>
+                            <button
+                                style={{
+                                    flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                    gap: '0.5rem', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: 'none',
+                                    fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', fontFamily: 'inherit',
+                                    transition: 'all 0.25s var(--ease)', color: 'white',
+                                    background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)',
+                                    boxShadow: '0 4px 16px rgba(16, 185, 129, 0.25)',
+                                    opacity: !isPaused ? 0.4 : 1,
+                                }}
+                                disabled={!isPaused}
+                                onClick={() => executeAction('unPause')}
+                            >
+                                <Zap size={14} /> Resume
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Total Escrows */}
+                    <div className="admin-stat-card">
+                        <div className="stat-header">
+                            <h4>Total Escrows</h4>
+                            <div className="stat-icon escrow-icon"><Users size={18} /></div>
+                        </div>
+                        <div className="stat-value">{escrowCount}</div>
+                    </div>
+
+                    {/* Platform Earnings */}
+                    <div className="admin-stat-card">
+                        <div className="stat-header">
+                            <h4>Platform Earnings</h4>
+                            <div className="stat-icon earnings-icon"><DollarSign size={18} /></div>
+                        </div>
+                        <div className="stat-value">
+                            {parseFloat(platformEarnings).toFixed(4)} <span>ETH</span>
+                        </div>
+                        <button
+                            className="admin-btn-primary"
+                            onClick={() => executeAction('withdrawPlatformFee')}
+                            disabled={parseFloat(platformEarnings) === 0}
+                        >
+                            <DollarSign size={14} /> Withdraw Fees
+                        </button>
+                    </div>
+
+                    {/* Platform Fee */}
+                    <div className="admin-stat-card">
+                        <div className="stat-header">
+                            <h4>Platform Fee</h4>
+                            <div className="stat-icon fee-icon"><Percent size={18} /></div>
+                        </div>
+                        <div className="stat-value">{platformFee}<span>%</span></div>
+                        <div className="fee-form">
+                            <input
+                                type="number"
+                                placeholder="New fee (1-10)"
+                                min="1"
+                                max="10"
+                                value={newFee}
+                                onChange={e => setNewFee(e.target.value)}
+                            />
+                            <button
+                                className="admin-btn-primary"
+                                style={{ width: 'auto', padding: '0.6rem 1rem' }}
+                                onClick={() => {
+                                    const f = parseInt(newFee);
+                                    if (f >= 1 && f <= 10) {
+                                        executeAction('changeFee', { newFee: BigInt(f) });
+                                        setNewFee('');
+                                    } else {
+                                        addToast('Fee must be between 1 and 10', 'error');
+                                    }
+                                }}
+                            >
+                                <Percent size={14} /> Set
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* ─── Disputed Escrows ─── */}
+                <div className="admin-disputes">
+                    <div className="admin-section-header">
+                        <Gavel size={20} />
+                        <h3>Dispute Resolution</h3>
+                        {disputedEscrows.length > 0 && (
+                            <span className="count-badge">{disputedEscrows.length}</span>
+                        )}
+                    </div>
+
+                    {loading ? (
+                        <div className="admin-empty">
+                            <Loader2 size={36} style={{ animation: 'spin 0.7s linear infinite' }} />
+                            <p>Loading escrows…</p>
+                        </div>
+                    ) : disputeLoadError ? (
+                        <div className="admin-empty">
+                            <AlertTriangle size={44} style={{ color: 'var(--warning)' }} />
+                            <p>{disputeLoadError}</p>
+                        </div>
+                    ) : disputedEscrows.length === 0 ? (
+                        <div className="admin-empty">
+                            <CheckCircle2 size={44} />
+                            <p>No disputed escrows. All clear!</p>
+                        </div>
+                    ) : (
+                        disputedEscrows.map(e => (
+                            <div key={e.escrowId} className="admin-dispute-card">
+                                <div className="dispute-top">
+                                    <span className="dispute-badge">Disputed</span>
+                                    <span className="dispute-id">Escrow #{e.escrowId}</span>
+                                </div>
+                                <div className="dispute-job">{e.jobDesc}</div>
+                                {(() => {
+                                    const reason = localStorage.getItem(`dispute_reason_${e.escrowId}`);
+                                    return reason ? (
+                                        <div style={{
+                                            padding: '0.6rem 0.85rem', marginBottom: '0.75rem',
+                                            background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.15)',
+                                            borderRadius: 'var(--radius-md)', fontSize: '0.82rem', color: 'var(--text-secondary)',
+                                            lineHeight: 1.5,
+                                        }}>
+                                            <span style={{ fontWeight: 700, color: '#ef4444', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: '0.25rem' }}>
+                                                Dispute Reason
+                                            </span>
+                                            {reason}
+                                        </div>
+                                    ) : null;
+                                })()}
+                                {(() => {
+                                    const raw = localStorage.getItem(`work_submission_${e.escrowId}`);
+                                    if (!raw) {
+                                        return (
+                                            <div style={{
+                                                padding: '0.6rem 0.85rem', marginBottom: '0.75rem',
+                                                background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.2)',
+                                                borderRadius: 'var(--radius-md)', fontSize: '0.82rem', color: '#f59e0b',
+                                                lineHeight: 1.5, fontWeight: 600,
+                                            }}>
+                                                <AlertTriangle size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }} />
+                                                No work was submitted before this dispute was raised.
+                                            </div>
+                                        );
+                                    }
+                                    try {
+                                        const sub = JSON.parse(raw);
+                                        return (
+                                            <div className="work-submission-box" style={{ marginBottom: '0.75rem' }}>
+                                                <span className="work-submission-label">
+                                                    <FileText size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />Work Submitted
+                                                </span>
+                                                {sub.text && <div style={{ marginBottom: sub.files?.length ? '0.4rem' : 0 }}>{sub.text}</div>}
+                                                {sub.files?.length > 0 && (
+                                                    <div className="file-preview-grid">
+                                                        {sub.files.map((f: any, i: number) => {
+                                                            const isOldFormat = typeof f === 'string';
+                                                            const fileName = isOldFormat ? f : f.name;
+                                                            const fileType = isOldFormat ? '' : f.type;
+                                                            const dataUrl = isOldFormat ? null : f.dataUrl;
+                                                            const isImage = fileType.startsWith('image/');
+
+                                                            if (isImage && dataUrl) {
+                                                                return (
+                                                                    <div key={i} className="file-preview-thumb" onClick={() => setLightboxImg(dataUrl)}>
+                                                                        <img src={dataUrl} alt={fileName} />
+                                                                        <div className="file-preview-overlay">
+                                                                            <Eye size={16} />
+                                                                        </div>
+                                                                        <span className="file-preview-name">{fileName}</span>
+                                                                    </div>
+                                                                );
+                                                            }
+
+                                                            if (dataUrl) {
+                                                                return (
+                                                                    <a key={i} href={dataUrl} download={fileName} className="file-preview-download">
+                                                                        <Download size={14} />
+                                                                        <span>{fileName}</span>
+                                                                    </a>
+                                                                );
+                                                            }
+
+                                                            return (
+                                                                <span key={i} className="file-preview-tag">
+                                                                    <Paperclip size={10} />{fileName}
+                                                                </span>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    } catch { return null; }
+                                })()}
+                                {(() => {
+                                    const rawChat = localStorage.getItem(`chat_${e.escrowId}`);
+                                    if (!rawChat) return null;
+                                    try {
+                                        const chatData = JSON.parse(rawChat);
+                                        const msgs = chatData.messages || [];
+                                        if (msgs.length === 0) return null;
+                                        return (
+                                            <div className="admin-chat-transcript">
+                                                <span className="admin-chat-label">
+                                                    <MessageCircle size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
+                                                    Chat Transcript ({msgs.length} messages)
+                                                </span>
+                                                <div className="admin-chat-messages">
+                                                    {msgs.map((m: any, i: number) => (
+                                                        <div key={i} className="admin-chat-msg">
+                                                            <span className="admin-chat-sender">{shortAddr(m.sender)}</span>
+                                                            <span className="admin-chat-text">{m.text}</span>
+                                                            <span className="admin-chat-time">{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    } catch { return null; }
+                                })()}
+                                <div className="dispute-parties">
+                                    <div className="party">
+                                        <span className="party-label"><Briefcase size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />Client</span>
+                                        <span className="party-addr">{shortAddr(e.employer)}</span>
+                                    </div>
+                                    <div className="party">
+                                        <span className="party-label"><User size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />Freelancer</span>
+                                        <span className="party-addr">{shortAddr(e.employee)}</span>
+                                    </div>
+                                </div>
+                                <div className="dispute-value">
+                                    {parseFloat(e.amount).toFixed(4)} <span>ETH</span>
+                                </div>
+                                <div className="resolve-actions">
+                                    {confirmReleaseId === e.escrowId ? (
+                                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                            <div style={{
+                                                padding: '0.6rem 0.85rem',
+                                                background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)',
+                                                borderRadius: 'var(--radius-md)', fontSize: '0.8rem', color: '#f59e0b',
+                                                fontWeight: 600,
+                                            }}>
+                                                <AlertTriangle size={13} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }} />
+                                                No work proof submitted. Release funds anyway?
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                <button
+                                                    style={{
+                                                        flex: 1, padding: '0.6rem', borderRadius: 'var(--radius-md)', border: 'none',
+                                                        fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit',
+                                                        color: 'white', background: '#f59e0b',
+                                                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+                                                    }}
+                                                    onClick={() => {
+                                                        setConfirmReleaseId(null);
+                                                        executeAction('resolve', { escrowId: e.escrowId, toFreelancer: true });
+                                                    }}
+                                                >
+                                                    Yes, Release
+                                                </button>
+                                                <button
+                                                    style={{
+                                                        flex: 1, padding: '0.6rem', borderRadius: 'var(--radius-md)',
+                                                        border: '1px solid var(--border)', background: 'var(--bg-glass)',
+                                                        fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit',
+                                                        color: 'var(--text-secondary)',
+                                                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+                                                    }}
+                                                    onClick={() => setConfirmReleaseId(null)}
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <button
+                                            style={{
+                                                flex: 1, padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', border: 'none',
+                                                fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', fontFamily: 'inherit',
+                                                transition: 'all 0.25s var(--ease)', color: 'white',
+                                                background: 'linear-gradient(135deg, #10b981 0%, #34d399 100%)',
+                                                boxShadow: '0 4px 16px rgba(16, 185, 129, 0.25)',
+                                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                                            }}
+                                            onClick={() => {
+                                                const hasWork = localStorage.getItem(`work_submission_${e.escrowId}`);
+                                                if (!hasWork) {
+                                                    setConfirmReleaseId(e.escrowId);
+                                                } else {
+                                                    executeAction('resolve', { escrowId: e.escrowId, toFreelancer: true });
+                                                }
+                                            }}
+                                        >
+                                            <CheckCircle2 size={14} /> Release to Freelancer
+                                        </button>
+                                    )}
+                                    <button
+                                        style={{
+                                            flex: 1, padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', border: 'none',
+                                            fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', fontFamily: 'inherit',
+                                            transition: 'all 0.25s var(--ease)', color: 'white',
+                                            background: '#ef4444',
+                                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                                        }}
+                                        onClick={() => executeAction('resolve', { escrowId: e.escrowId, toFreelancer: false })}
+                                    >
+                                        <XCircle size={14} /> Refund Client
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                {/* ─── Resolved Disputes History ─── */}
+                {resolvedEscrows.length > 0 && (
+                    <div className="admin-disputes" style={{ marginTop: '1.5rem' }}>
+                        <button
+                            className={`history-toggle ${showResolvedHistory ? 'open' : ''}`}
+                            onClick={() => setShowResolvedHistory(!showResolvedHistory)}
+                            style={{ width: '100%', marginBottom: showResolvedHistory ? '1rem' : 0 }}
+                        >
+                            <History size={16} />
+                            <span>Resolved Disputes</span>
+                            <span className="history-count">{resolvedEscrows.length}</span>
+                        </button>
+                        {showResolvedHistory && resolvedEscrows.map(e => (
+                            <div key={e.escrowId} className="admin-dispute-card" style={{ opacity: 0.75 }}>
+                                <div className="dispute-top">
+                                    <span className="dispute-badge" style={{ background: e.status === 4 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(107, 114, 128, 0.15)', color: e.status === 4 ? '#10b981' : '#6b7280' }}>
+                                        {e.status === 4 ? 'Released' : 'Cancelled'}
+                                    </span>
+                                    <span className="dispute-id">Escrow #{e.escrowId}</span>
+                                </div>
+                                <div className="dispute-job">{e.jobDesc}</div>
+                                {(() => {
+                                    const reason = localStorage.getItem(`dispute_reason_${e.escrowId}`);
+                                    return reason ? (
+                                        <div style={{ padding: '0.5rem 0.75rem', marginBottom: '0.5rem', background: 'rgba(107, 114, 128, 0.08)', border: '1px solid rgba(107, 114, 128, 0.15)', borderRadius: 'var(--radius-md)', fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                            <span style={{ fontWeight: 700, fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: '0.2rem', color: 'var(--text-muted)' }}>Dispute Reason</span>
+                                            {reason}
+                                        </div>
+                                    ) : null;
+                                })()}
+                                <div className="dispute-parties">
+                                    <div><User size={13} /> Client: <span>{shortAddr(e.employer)}</span></div>
+                                    <div><Briefcase size={13} /> Freelancer: <span>{shortAddr(e.employee)}</span></div>
+                                </div>
+                                <div className="dispute-value">{parseFloat(e.amount).toFixed(4)} <span>ETH</span></div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* ─── Transfer Ownership ─── */}
+                <div className="admin-ownership-section">
+                    <div className="admin-section-header">
+                        <ShieldCheck size={20} />
+                        <h3>Ownership</h3>
+                    </div>
+                    <div className="admin-ownership-card">
+                        <h4>Current Owner</h4>
+                        <div className="owner-current">{owner}</div>
+                        <h4>Transfer Ownership</h4>
+                        <div className="transfer-form">
+                            <input
+                                value={newOwner}
+                                onChange={e => setNewOwner(e.target.value)}
+                                placeholder="New owner address (0x...)"
+                            />
+                            <button
+                                className="admin-btn-primary"
+                                style={{ width: 'auto', padding: '0.6rem 1rem' }}
+                                onClick={() => {
+                                    if (!ethers.isAddress(newOwner)) {
+                                        return addToast('Invalid address', 'error');
+                                    }
+                                    if (newOwner.toLowerCase() === account.toLowerCase()) {
+                                        return addToast('Already the owner', 'error');
+                                    }
+                                    executeAction('transferOwnership', { newOwner });
+                                    setNewOwner('');
+                                }}
+                            >
+                                Transfer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* ═══ LIGHTBOX ═══ */}
+            {lightboxImg && (
+                <div className="lightbox-overlay" onClick={() => setLightboxImg(null)}>
+                    <button className="lightbox-close" onClick={() => setLightboxImg(null)}>
+                        <X size={24} />
+                    </button>
+                    <img src={lightboxImg} alt="Preview" className="lightbox-img" onClick={ev => ev.stopPropagation()} />
+                </div>
+            )}
+        </div>
+    );
+}
