@@ -99,7 +99,7 @@ function parseError(err: any): string {
 
 function App() {
   const [providers, setProviders] = useState<EIP6963ProviderDetail[]>([]);
-  const [, setSelectedProvider] = useState<any>(null);
+  const [currentProvider, setCurrentProvider] = useState<any>(null);
   const [account, setAccount] = useState<string>('');
   const [chainId, setChainId] = useState<string>('');
   const [showModal, setShowModal] = useState(false);
@@ -138,6 +138,38 @@ function App() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4500);
   };
 
+  // Switch to Sepolia network
+  const switchToSepolia = async (provider?: any) => {
+    const p = provider || currentProvider;
+    if (!p) return;
+    try {
+      await p.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: SEPOLIA_CHAIN_ID }],
+      });
+    } catch (switchError: any) {
+      // Error code 4902 = chain not added yet
+      if (switchError.code === 4902) {
+        try {
+          await p.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: SEPOLIA_CHAIN_ID,
+              chainName: 'Sepolia Testnet',
+              nativeCurrency: { name: 'Sepolia ETH', symbol: 'ETH', decimals: 18 },
+              rpcUrls: ['https://rpc.sepolia.org'],
+              blockExplorerUrls: ['https://sepolia.etherscan.io'],
+            }],
+          });
+        } catch (addError: any) {
+          addToast('Failed to add Sepolia network: ' + (addError.message || ''), 'error');
+        }
+      } else {
+        addToast('Failed to switch network: ' + (switchError.message || ''), 'error');
+      }
+    }
+  };
+
   // Wallet Discovery
   useEffect(() => {
     const onAnnouncement = (event: any) => {
@@ -159,7 +191,12 @@ function App() {
       const browserProvider = new ethers.BrowserProvider(detail.provider);
       const signer = await browserProvider.getSigner();
 
-      setSelectedProvider(detail.provider);
+      setCurrentProvider(detail.provider);
+
+      // Auto-switch to Sepolia if on wrong network
+      if (network !== SEPOLIA_CHAIN_ID) {
+        switchToSepolia(detail.provider);
+      }
       setAccount(accounts[0]);
       setChainId(network);
       setContract(new ethers.Contract(contractAddress, abi, signer));
@@ -192,7 +229,7 @@ function App() {
   const disconnectWallet = () => {
     setAccount('');
     setChainId('');
-    setSelectedProvider(null);
+    setCurrentProvider(null);
     setContract(null);
     setOwner('');
     setEscrows([]);
@@ -470,8 +507,13 @@ function App() {
               </button>
             )}
             {account && (
-              <div className={`net-badge ${isSepolia ? 'ok' : 'warn'}`}>
-                {isSepolia ? 'Sepolia' : 'Wrong Network'}
+              <div
+                className={`net-badge ${isSepolia ? 'ok' : 'warn'}`}
+                onClick={!isSepolia ? () => switchToSepolia() : undefined}
+                style={!isSepolia ? { cursor: 'pointer' } : undefined}
+                title={!isSepolia ? 'Click to switch to Sepolia' : 'Connected to Sepolia'}
+              >
+                {isSepolia ? 'Sepolia' : '⚠ Switch to Sepolia'}
               </div>
             )}
           </div>
