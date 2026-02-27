@@ -1,0 +1,64 @@
+{
+	"compiler": {
+		"version": "0.8.3+commit.8d00100c"
+	},
+	"language": "Solidity",
+	"output": {
+		"abi": [
+			{
+				"inputs": [],
+				"stateMutability": "nonpayable",
+				"type": "constructor"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "newOwner",
+						"type": "address"
+					}
+				],
+				"name": "transferOwnership",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			}
+		],
+		"devdoc": {
+			"kind": "dev",
+			"methods": {},
+			"version": 1
+		},
+		"userdoc": {
+			"kind": "user",
+			"methods": {},
+			"version": 1
+		}
+	},
+	"settings": {
+		"compilationTarget": {
+			"contract/firstWork.sol": "Ownable"
+		},
+		"evmVersion": "istanbul",
+		"libraries": {},
+		"metadata": {
+			"bytecodeHash": "ipfs"
+		},
+		"optimizer": {
+			"enabled": false,
+			"runs": 200
+		},
+		"remappings": []
+	},
+	"sources": {
+		"contract/firstWork.sol": {
+			"keccak256": "0xe9f243a1d385409a63da053860289cbac1723839fab314b8e14c95d223538f5d",
+			"license": "GPL-3.0",
+			"urls": [
+				"bzz-raw://b8b1b4809defa046442a20ae0cfa8284e4708450333d75f6cdef2a4b8d9836c6",
+				"dweb:/ipfs/QmTnNakHJy6VWrG3BE2fbKGPn6AvgcEmVX4Tv625a6gSwi"
+			]
+		}
+	},
+	"version": 1
+}
