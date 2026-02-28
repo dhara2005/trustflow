@@ -128,8 +128,39 @@ function App() {
   const [openChatId, setOpenChatId] = useState<number | null>(null);
   const [chatInput, setChatInput] = useState('');
 
+  // IPFS submission cache: escrowId -> submission data
+  const [ipfsSubmissions, setIpfsSubmissions] = useState<Record<number, any>>({});
+
   const isSepolia = chainId === SEPOLIA_CHAIN_ID;
   const isOwner = account && owner && account.toLowerCase() === owner.toLowerCase();
+
+  // Fetch a work submission: try localStorage first, then IPFS
+  const getSubmission = useCallback((escrowId: number): any | null => {
+    // Check in-memory IPFS cache first
+    if (ipfsSubmissions[escrowId]) return ipfsSubmissions[escrowId];
+    // Check localStorage (legacy + CID-based)
+    const raw = localStorage.getItem(`work_submission_${escrowId}`);
+    if (raw) {
+      try { return JSON.parse(raw); } catch { /* ignore */ }
+    }
+    return null;
+  }, [ipfsSubmissions]);
+
+  // Load IPFS submission by CID stored in localStorage
+  const loadIpfsSubmission = useCallback(async (escrowId: number) => {
+    if (ipfsSubmissions[escrowId]) return; // Already loaded
+    const cid = localStorage.getItem(`work_cid_${escrowId}`);
+    if (!cid) return;
+    try {
+      const res = await fetch(`/api/submission?cid=${cid}`);
+      if (res.ok) {
+        const data = await res.json();
+        setIpfsSubmissions(prev => ({ ...prev, [escrowId]: data }));
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch IPFS submission for escrow ${escrowId}:`, err);
+    }
+  }, [ipfsSubmissions]);
 
   // Toast helpers
   const addToast = (message: string, type: 'success' | 'error') => {
@@ -674,43 +705,51 @@ function App() {
                                   ) : null;
                                 })()}
                                 {(e.status >= Status.Completed) && (() => {
-                                  const raw = localStorage.getItem(`work_submission_${e.escrowId}`);
-                                  if (!raw) return null;
-                                  try {
-                                    const sub = JSON.parse(raw);
+                                  const sub = getSubmission(e.escrowId);
+                                  // Trigger IPFS fetch if not in cache
+                                  if (!sub && localStorage.getItem(`work_cid_${e.escrowId}`)) {
+                                    loadIpfsSubmission(e.escrowId);
                                     return (
                                       <div className="work-submission-box">
                                         <span className="work-submission-label">
-                                          <FileText size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />Work Submitted
+                                          <FileText size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />Loading submission...
                                         </span>
-                                        {sub.text && <div style={{ marginBottom: sub.files?.length ? '0.4rem' : 0 }}>{sub.text}</div>}
-                                        {sub.files?.length > 0 && (
-                                          <div className="file-preview-grid">
-                                            {sub.files.map((f: any, i: number) => {
-                                              const isOldFormat = typeof f === 'string';
-                                              const fileName = isOldFormat ? f : f.name;
-                                              const fileType = isOldFormat ? '' : f.type;
-                                              const dataUrl = isOldFormat ? null : f.dataUrl;
-                                              const isImage = fileType.startsWith('image/');
-                                              if (isImage && dataUrl) {
-                                                return (
-                                                  <div key={i} className="file-preview-thumb" onClick={() => setLightboxImg(dataUrl)}>
-                                                    <img src={dataUrl} alt={fileName} />
-                                                    <div className="file-preview-overlay"><Eye size={16} /></div>
-                                                    <span className="file-preview-name">{fileName}</span>
-                                                  </div>
-                                                );
-                                              }
-                                              if (dataUrl) {
-                                                return (<a key={i} href={dataUrl} download={fileName} className="file-preview-download"><Download size={14} /><span>{fileName}</span></a>);
-                                              }
-                                              return (<span key={i} className="file-preview-tag"><Paperclip size={10} />{fileName}</span>);
-                                            })}
-                                          </div>
-                                        )}
                                       </div>
                                     );
-                                  } catch { return null; }
+                                  }
+                                  if (!sub) return null;
+                                  return (
+                                    <div className="work-submission-box">
+                                      <span className="work-submission-label">
+                                        <FileText size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />Work Submitted
+                                      </span>
+                                      {sub.text && <div style={{ marginBottom: sub.files?.length ? '0.4rem' : 0 }}>{sub.text}</div>}
+                                      {sub.files?.length > 0 && (
+                                        <div className="file-preview-grid">
+                                          {sub.files.map((f: any, i: number) => {
+                                            const isOldFormat = typeof f === 'string';
+                                            const fileName = isOldFormat ? f : f.name;
+                                            const fileType = isOldFormat ? '' : f.type;
+                                            const dataUrl = isOldFormat ? null : f.dataUrl;
+                                            const isImage = fileType.startsWith('image/');
+                                            if (isImage && dataUrl) {
+                                              return (
+                                                <div key={i} className="file-preview-thumb" onClick={() => setLightboxImg(dataUrl)}>
+                                                  <img src={dataUrl} alt={fileName} />
+                                                  <div className="file-preview-overlay"><Eye size={16} /></div>
+                                                  <span className="file-preview-name">{fileName}</span>
+                                                </div>
+                                              );
+                                            }
+                                            if (dataUrl) {
+                                              return (<a key={i} href={dataUrl} download={fileName} className="file-preview-download"><Download size={14} /><span>{fileName}</span></a>);
+                                            }
+                                            return (<span key={i} className="file-preview-tag"><Paperclip size={10} />{fileName}</span>);
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
                                 })()}
                                 <div className="card-meta">
                                   <div className="meta-row">
@@ -737,14 +776,15 @@ function App() {
                                     </button>
                                   )}
                                   {e.status === Status.Completed && activeTab === 'client' && (() => {
-                                    const raw = localStorage.getItem(`work_submission_${e.escrowId}`);
-                                    if (!raw) return null;
-                                    try {
-                                      const sub = JSON.parse(raw);
-                                      const images = (sub.files || []).filter((f: any) => typeof f !== 'string' && f.type?.startsWith('image/'));
-                                      if (images.length === 0) return null;
-                                      return (<button className="outline" onClick={() => setLightboxImg(images[0].dataUrl)}><Eye size={14} /> Review Files</button>);
-                                    } catch { return null; }
+                                    const sub = getSubmission(e.escrowId);
+                                    if (!sub) {
+                                      // Try to load from IPFS if CID exists
+                                      if (localStorage.getItem(`work_cid_${e.escrowId}`)) loadIpfsSubmission(e.escrowId);
+                                      return null;
+                                    }
+                                    const images = (sub.files || []).filter((f: any) => typeof f !== 'string' && f.type?.startsWith('image/'));
+                                    if (images.length === 0) return null;
+                                    return (<button className="outline" onClick={() => setLightboxImg(images[0].dataUrl)}><Eye size={14} /> Review Files</button>);
                                   })()}
                                   {e.status === Status.Completed && activeTab === 'client' && (
                                     <button className="success" onClick={() => executeAction(e.escrowId, 'approve')}><CheckCircle2 size={14} /> Approve & Pay</button>
@@ -984,7 +1024,32 @@ function App() {
                       files: submitWorkFiles,
                       submittedAt: new Date().toISOString(),
                     };
+                    // Save to localStorage as fallback
                     localStorage.setItem(`work_submission_${submitWorkId}`, JSON.stringify(submission));
+
+                    // Upload to IPFS via serverless API
+                    try {
+                      const res = await fetch('/api/upload', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          text: submission.text,
+                          files: submission.files,
+                          escrowId: submitWorkId,
+                          submitter: account,
+                        }),
+                      });
+                      if (res.ok) {
+                        const { cid } = await res.json();
+                        localStorage.setItem(`work_cid_${submitWorkId}`, cid);
+                        console.log('[IPFS] Submission uploaded, CID:', cid);
+                      } else {
+                        console.warn('[IPFS] Upload failed, using localStorage fallback');
+                      }
+                    } catch (ipfsErr) {
+                      console.warn('[IPFS] Upload error, using localStorage fallback:', ipfsErr);
+                    }
+
                     const id = submitWorkId;
                     setSubmitWorkId(null);
                     setSubmitWorkText('');
