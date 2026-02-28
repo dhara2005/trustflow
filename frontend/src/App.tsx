@@ -146,21 +146,29 @@ function App() {
     return null;
   }, [ipfsSubmissions]);
 
-  // Load IPFS submission by CID stored in localStorage
+  // Load IPFS submission by searching Pinata for escrowId
+  const fetchingRef = useState<Set<number>>(() => new Set())[0];
   const loadIpfsSubmission = useCallback(async (escrowId: number) => {
     if (ipfsSubmissions[escrowId]) return; // Already loaded
-    const cid = localStorage.getItem(`work_cid_${escrowId}`);
-    if (!cid) return;
+    if (fetchingRef.has(escrowId)) return; // Already fetching
+    fetchingRef.add(escrowId);
     try {
-      const res = await fetch(`/api/submission?cid=${cid}`);
+      // Try CID from localStorage first (fast path)
+      const cid = localStorage.getItem(`work_cid_${escrowId}`);
+      const url = cid
+        ? `/api/submission?cid=${cid}`
+        : `/api/submission?escrowId=${escrowId}`;
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setIpfsSubmissions(prev => ({ ...prev, [escrowId]: data }));
       }
     } catch (err) {
       console.warn(`Failed to fetch IPFS submission for escrow ${escrowId}:`, err);
+    } finally {
+      fetchingRef.delete(escrowId);
     }
-  }, [ipfsSubmissions]);
+  }, [ipfsSubmissions, fetchingRef]);
 
   // Toast helpers
   const addToast = (message: string, type: 'success' | 'error') => {
@@ -706,18 +714,11 @@ function App() {
                                 })()}
                                 {(e.status >= Status.Completed) && (() => {
                                   const sub = getSubmission(e.escrowId);
-                                  // Trigger IPFS fetch if not in cache
-                                  if (!sub && localStorage.getItem(`work_cid_${e.escrowId}`)) {
+                                  // Auto-fetch from IPFS if no local data
+                                  if (!sub) {
                                     loadIpfsSubmission(e.escrowId);
-                                    return (
-                                      <div className="work-submission-box">
-                                        <span className="work-submission-label">
-                                          <FileText size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />Loading submission...
-                                        </span>
-                                      </div>
-                                    );
+                                    return null;
                                   }
-                                  if (!sub) return null;
                                   return (
                                     <div className="work-submission-box">
                                       <span className="work-submission-label">
@@ -778,8 +779,7 @@ function App() {
                                   {e.status === Status.Completed && activeTab === 'client' && (() => {
                                     const sub = getSubmission(e.escrowId);
                                     if (!sub) {
-                                      // Try to load from IPFS if CID exists
-                                      if (localStorage.getItem(`work_cid_${e.escrowId}`)) loadIpfsSubmission(e.escrowId);
+                                      loadIpfsSubmission(e.escrowId);
                                       return null;
                                     }
                                     const images = (sub.files || []).filter((f: any) => typeof f !== 'string' && f.type?.startsWith('image/'));

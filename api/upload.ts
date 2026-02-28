@@ -37,7 +37,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             body: JSON.stringify({
                 pinataContent: submission,
                 pinataMetadata: {
-                    name: `trustflow_submission_${escrowId}_${Date.now()}`,
+                    name: `trustflow_submission_${escrowId}`,
+                    keyvalues: {
+                        escrowId: escrowId.toString(),
+                        submitter: submitter || '',
+                        app: 'trustflow',
+                    },
                 },
             }),
         });
