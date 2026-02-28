@@ -484,6 +484,39 @@ function App() {
         </div>
       </aside>
 
+      {/* Mobile wallet bar - visible only on mobile */}
+      <div className="mobile-wallet-bar">
+        {!account ? (
+          <button className="connect-btn" onClick={() => setShowModal(true)}>
+            <Wallet size={16} /> Connect Wallet
+          </button>
+        ) : (
+          <div className="mobile-wallet-info">
+            <div className="mobile-wallet-left">
+              <span className="mobile-wallet-addr">{shortAddr(account)}</span>
+              <span className="mobile-wallet-earnings">{parseFloat(myEarnings).toFixed(4)} ETH</span>
+            </div>
+            <div className="mobile-wallet-right">
+              <button
+                className="withdraw-btn"
+                onClick={() => executeAction(0, 'withdraw')}
+                disabled={loading || txLoading || parseFloat(myEarnings) === 0}
+                style={{ margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.75rem' }}
+              >
+                <DollarSign size={12} /> Withdraw
+              </button>
+              <button
+                className="disconnect-btn"
+                onClick={disconnectWallet}
+                title="Disconnect wallet"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* â”€â”€â”€ MAIN CONTENT â”€â”€â”€ */}
       <main className="content">
         <header className="content-header">

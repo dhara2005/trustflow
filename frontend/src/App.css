@@ -9,11 +9,7 @@
   min-height: 100vh;
 }
 
-@media (max-width: 768px) {
-  .app-layout {
-    grid-template-columns: 1fr;
-  }
-}
+
 
 /* ─── WALLET MODAL ─── */
 .modal-overlay {
@@ -122,27 +118,7 @@
   overflow-y: auto;
 }
 
-@media (max-width: 768px) {
-  .sidebar {
-    position: static;
-    height: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    padding: 1rem;
-    align-items: center;
-    gap: 1rem;
-  }
 
-  .sidebar nav {
-    flex-direction: row;
-    flex: 1;
-    overflow-x: auto;
-  }
-
-  .wallet-card {
-    width: 100%;
-  }
-}
 
 .logo {
   display: flex;
@@ -331,17 +307,9 @@ nav button.active::before {
   max-width: 1200px;
 }
 
-@media (max-width: 1024px) {
-  .content {
-    padding: 2rem 2rem;
-  }
-}
 
-@media (max-width: 768px) {
-  .content {
-    padding: 1.5rem 1rem;
-  }
-}
+
+
 
 .content-header {
   display: flex;
@@ -658,11 +626,7 @@ nav button.active::before {
   gap: 1.25rem;
 }
 
-@media (max-width: 768px) {
-  .escrow-grid {
-    grid-template-columns: 1fr;
-  }
-}
+
 
 .escrow-card {
   background: var(--bg-card);
@@ -1647,4 +1611,375 @@ nav button.active::before {
   font-weight: 600;
   border-top: 1px solid var(--border);
   background: var(--bg-glass);
+}
+
+/* ─── MOBILE WALLET BAR ─── */
+.mobile-wallet-bar {
+  display: none;
+}
+
+.mobile-wallet-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.mobile-wallet-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.mobile-wallet-addr {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.mobile-wallet-earnings {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.mobile-wallet-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ═══════════════════════════════════════════════════
+   MOBILE RESPONSIVE — Comprehensive Overhaul
+   ═══════════════════════════════════════════════════ */
+
+/* ─── TABLET ─── */
+@media (max-width: 1024px) {
+  .content {
+    padding: 2rem 1.5rem;
+  }
+}
+
+/* ─── MOBILE ─── */
+@media (max-width: 768px) {
+
+  /* Layout: sidebar top, content below with bottom padding for tab bar */
+  .app-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  /* Sidebar → Fixed bottom tab bar */
+  .sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    height: auto;
+    z-index: 1000;
+    flex-direction: row;
+    padding: 0;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    background: var(--bg-surface);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    overflow: visible;
+  }
+
+  /* Hide logo on mobile */
+  .sidebar .logo {
+    display: none;
+  }
+
+  /* Hide wallet card from sidebar on mobile */
+  .sidebar .wallet-card {
+    display: none;
+  }
+
+  /* Show mobile wallet bar */
+  .mobile-wallet-bar {
+    display: block;
+    padding: 0.75rem 1rem;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mobile-wallet-bar .connect-btn {
+    width: 100%;
+    padding: 0.65rem;
+    font-size: 0.85rem;
+  }
+
+  /* Nav → horizontal bottom tabs */
+  .sidebar nav {
+    flex-direction: row;
+    width: 100%;
+    gap: 0;
+    flex: 1;
+  }
+
+  .sidebar nav button {
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 0.6rem 0.25rem;
+    font-size: 0.65rem;
+    border-radius: 0;
+    min-height: 56px;
+  }
+
+  .sidebar nav button.active::before {
+    left: 50%;
+    transform: translateX(-50%);
+    top: 0;
+    bottom: auto;
+    width: 60%;
+    height: 2.5px;
+  }
+
+  /* Content: add padding-bottom for fixed tab bar */
+  .content {
+    padding: 1.25rem 1rem;
+    padding-bottom: 80px;
+  }
+
+  /* Content header: stack vertically */
+  .content-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .content-header .title h2 {
+    font-size: 1.25rem;
+  }
+
+  .content-header>div:last-child {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  /* Card form: full-width, reduced padding */
+  .card-form {
+    max-width: 100%;
+    padding: 1.5rem 1.25rem;
+  }
+
+  .card-form h3 {
+    font-size: 1.05rem;
+  }
+
+  /* Escrow grid: single column */
+  .escrow-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  /* Escrow card: slightly reduced padding */
+  .escrow-card {
+    padding: 1.25rem;
+  }
+
+  .escrow-card h4 {
+    font-size: 0.9rem;
+  }
+
+  .amount {
+    font-size: 1.5rem;
+  }
+
+  /* Card actions: stack on small screens */
+  .card-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .card-actions button {
+    min-width: auto;
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  /* Wallet modal: full-width on mobile */
+  .modal-overlay {
+    padding: 1rem;
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    max-width: 100%;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    animation: slideUpModal 0.3s var(--ease);
+  }
+
+  /* Submit Work modal responsive */
+  .loading-overlay+div,
+  div[style*="position: fixed"][style*="inset: 0"]>div {
+    max-width: 100% !important;
+    margin: 0.5rem !important;
+  }
+
+  /* Toast: bottom-center on mobile, above tab bar */
+  .toast-container {
+    bottom: 72px;
+    right: 1rem;
+    left: 1rem;
+    align-items: stretch;
+  }
+
+  .toast {
+    min-width: auto;
+    max-width: 100%;
+  }
+
+  /* Empty state: reduce padding */
+  .empty-center {
+    padding: 3rem 1.5rem;
+  }
+
+  .empty-center p {
+    font-size: 0.88rem;
+  }
+
+  /* Banner error: smaller text */
+  .banner-error {
+    font-size: 0.82rem;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1.25rem;
+  }
+
+  /* Fee preview: tighter */
+  .fee-preview {
+    padding: 0.85rem 1rem;
+  }
+
+  /* Buttons: full-width on mobile forms */
+  .primary,
+  .success,
+  .danger,
+  .outline {
+    padding: 0.85rem 1.25rem;
+    font-size: 0.85rem;
+  }
+
+  /* Chat: wider bubbles */
+  .chat-msg {
+    max-width: 90%;
+  }
+
+  .chat-messages {
+    max-height: 180px;
+  }
+
+  /* Lightbox: full-screen */
+  .lightbox-overlay {
+    padding: 0.5rem;
+  }
+
+  .lightbox-img {
+    max-width: 98vw;
+    max-height: 90vh;
+    border-radius: var(--radius-md);
+  }
+
+  .lightbox-close {
+    top: 0.75rem;
+    right: 0.75rem;
+    width: 36px;
+    height: 36px;
+  }
+
+  /* File preview grid: smaller thumbnails */
+  .file-preview-thumb {
+    width: 64px;
+    height: 64px;
+  }
+
+  /* History section */
+  .history-toggle {
+    font-size: 0.82rem;
+  }
+
+  /* Admin grid */
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Dispute section */
+  .resolve-btns {
+    flex-direction: column;
+  }
+
+  .resolve-btns button {
+    width: 100%;
+  }
+
+  /* Work submission box: ensure readability */
+  .work-submission-box {
+    font-size: 0.8rem;
+  }
+
+  /* Inline form: stack on mobile */
+  .inline-form {
+    flex-direction: column;
+  }
+
+  .inline-form button {
+    width: 100%;
+  }
+}
+
+/* ─── SMALL PHONES ─── */
+@media (max-width: 380px) {
+  .sidebar nav button {
+    font-size: 0.58rem;
+    padding: 0.5rem 0.15rem;
+    min-height: 50px;
+  }
+
+  .sidebar nav button svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .content {
+    padding: 1rem 0.75rem;
+    padding-bottom: 70px;
+  }
+
+  .content-header .title h2 {
+    font-size: 1.1rem;
+  }
+
+  .card-form {
+    padding: 1.25rem 1rem;
+  }
+
+  .escrow-card {
+    padding: 1rem;
+  }
+
+  .amount {
+    font-size: 1.3rem;
+  }
+}
+
+/* ─── MOBILE MODAL ANIMATION ─── */
+@keyframes slideUpModal {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
