@@ -599,7 +599,7 @@ function App() {
         )}
 
         {!account ? (
-          <div className="empty-center">
+          <div className="empty-center connect-prompt">
             <Lock size={48} />
             <p>Connect your wallet to access the TrustFlow escrow platform and manage your projects.</p>
             <button className="primary" onClick={() => setShowModal(true)}>

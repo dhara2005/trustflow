@@ -1713,6 +1713,11 @@ nav button.active::before {
     font-size: 0.85rem;
   }
 
+  /* Hide the content area connect prompt on mobile (redundant with mobile wallet bar) */
+  .connect-prompt {
+    display: none;
+  }
+
   /* Nav → horizontal bottom tabs */
   .sidebar nav {
     flex-direction: row;
