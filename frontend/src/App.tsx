@@ -731,19 +731,20 @@ function App() {
                                             const isOldFormat = typeof f === 'string';
                                             const fileName = isOldFormat ? f : f.name;
                                             const fileType = isOldFormat ? '' : f.type;
-                                            const dataUrl = isOldFormat ? null : f.dataUrl;
+                                            const imgSrc = f.dataUrl || f.url || null;
                                             const isImage = fileType.startsWith('image/');
-                                            if (isImage && dataUrl) {
+                                            if (isImage && imgSrc) {
                                               return (
-                                                <div key={i} className="file-preview-thumb" onClick={() => setLightboxImg(dataUrl)}>
-                                                  <img src={dataUrl} alt={fileName} />
+                                                <div key={i} className="file-preview-thumb" onClick={() => setLightboxImg(imgSrc)}>
+                                                  <img src={imgSrc} alt={fileName} />
                                                   <div className="file-preview-overlay"><Eye size={16} /></div>
                                                   <span className="file-preview-name">{fileName}</span>
                                                 </div>
                                               );
                                             }
-                                            if (dataUrl) {
-                                              return (<a key={i} href={dataUrl} download={fileName} className="file-preview-download"><Download size={14} /><span>{fileName}</span></a>);
+                                            const downloadUrl = f.dataUrl || f.url;
+                                            if (downloadUrl) {
+                                              return (<a key={i} href={downloadUrl} download={fileName} target="_blank" rel="noopener noreferrer" className="file-preview-download"><Download size={14} /><span>{fileName}</span></a>);
                                             }
                                             return (<span key={i} className="file-preview-tag"><Paperclip size={10} />{fileName}</span>);
                                           })}
@@ -784,7 +785,9 @@ function App() {
                                     }
                                     const images = (sub.files || []).filter((f: any) => typeof f !== 'string' && f.type?.startsWith('image/'));
                                     if (images.length === 0) return null;
-                                    return (<button className="outline" onClick={() => setLightboxImg(images[0].dataUrl)}><Eye size={14} /> Review Files</button>);
+                                    const imgSrc = images[0].dataUrl || images[0].url;
+                                    if (!imgSrc) return null;
+                                    return (<button className="outline" onClick={() => setLightboxImg(imgSrc)}><Eye size={14} /> Review Files</button>);
                                   })()}
                                   {e.status === Status.Completed && activeTab === 'client' && (
                                     <button className="success" onClick={() => executeAction(e.escrowId, 'approve')}><CheckCircle2 size={14} /> Approve & Pay</button>
@@ -1019,22 +1022,68 @@ function App() {
                     if (!submitWorkText.trim() && submitWorkFiles.length === 0) {
                       return addToast('Please describe the work or attach files.', 'error');
                     }
-                    const submission = {
-                      text: submitWorkText.trim(),
-                      files: submitWorkFiles,
-                      submittedAt: new Date().toISOString(),
-                    };
-                    // Save to localStorage as fallback
-                    localStorage.setItem(`work_submission_${submitWorkId}`, JSON.stringify(submission));
 
-                    // Upload to IPFS via serverless API
+                    addToast('Uploading submission...', 'success');
+
+                    // Step 1: Upload files directly to Pinata (for large file support)
+                    let uploadedFiles: { name: string; type: string; cid?: string; dataUrl?: string }[] = [];
+                    if (submitWorkFiles.length > 0) {
+                      try {
+                        // Get temporary upload credentials
+                        const credRes = await fetch('/api/sign-upload', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ escrowId: submitWorkId }),
+                        });
+
+                        if (credRes.ok) {
+                          const creds = await credRes.json();
+                          // Upload each file directly to Pinata
+                          for (const f of submitWorkFiles) {
+                            try {
+                              // Convert base64 dataUrl to Blob
+                              const resp = await fetch(f.dataUrl);
+                              const blob = await resp.blob();
+                              const formData = new FormData();
+                              formData.append('file', blob, f.name);
+                              formData.append('pinataMetadata', JSON.stringify({
+                                name: `trustflow_file_${submitWorkId}_${f.name}`,
+                              }));
+
+                              const uploadRes = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+                                method: 'POST',
+                                headers: { Authorization: `Bearer ${creds.jwt}` },
+                                body: formData,
+                              });
+
+                              if (uploadRes.ok) {
+                                const uploadData = await uploadRes.json();
+                                uploadedFiles.push({ name: f.name, type: f.type, cid: uploadData.IpfsHash });
+                              } else {
+                                // Fallback: send as base64
+                                uploadedFiles.push({ name: f.name, type: f.type, dataUrl: f.dataUrl });
+                              }
+                            } catch {
+                              uploadedFiles.push({ name: f.name, type: f.type, dataUrl: f.dataUrl });
+                            }
+                          }
+                        } else {
+                          // Credentials failed: fall back to base64
+                          uploadedFiles = submitWorkFiles.map(f => ({ name: f.name, type: f.type, dataUrl: f.dataUrl }));
+                        }
+                      } catch {
+                        uploadedFiles = submitWorkFiles.map(f => ({ name: f.name, type: f.type, dataUrl: f.dataUrl }));
+                      }
+                    }
+
+                    // Step 2: Upload submission metadata to IPFS
                     try {
                       const res = await fetch('/api/upload', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                          text: submission.text,
-                          files: submission.files,
+                          text: submitWorkText.trim(),
+                          files: uploadedFiles,
                           escrowId: submitWorkId,
                           submitter: account,
                         }),
@@ -1044,10 +1093,15 @@ function App() {
                         localStorage.setItem(`work_cid_${submitWorkId}`, cid);
                         console.log('[IPFS] Submission uploaded, CID:', cid);
                       } else {
-                        console.warn('[IPFS] Upload failed, using localStorage fallback');
+                        // Save to localStorage as fallback
+                        localStorage.setItem(`work_submission_${submitWorkId}`, JSON.stringify({
+                          text: submitWorkText.trim(), files: submitWorkFiles, submittedAt: new Date().toISOString(),
+                        }));
                       }
-                    } catch (ipfsErr) {
-                      console.warn('[IPFS] Upload error, using localStorage fallback:', ipfsErr);
+                    } catch {
+                      localStorage.setItem(`work_submission_${submitWorkId}`, JSON.stringify({
+                        text: submitWorkText.trim(), files: submitWorkFiles, submittedAt: new Date().toISOString(),
+                      }));
                     }
 
                     const id = submitWorkId;

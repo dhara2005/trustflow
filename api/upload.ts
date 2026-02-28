@@ -1,7 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-    // Only allow POST
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
@@ -18,16 +17,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(400).json({ error: 'No submission content provided' });
         }
 
-        // Build the submission object
+        // Files can be either:
+        // - { name, cid, type } (new: direct-uploaded to Pinata, reference by CID)
+        // - { name, dataUrl, type } (legacy: base64 data, for small files)
+        const processedFiles = (files || []).map((f: any) => {
+            if (f.cid) {
+                // Direct-uploaded file: store gateway URL
+                return {
+                    name: f.name,
+                    type: f.type,
+                    cid: f.cid,
+                    url: `https://gateway.pinata.cloud/ipfs/${f.cid}`,
+                };
+            }
+            // Legacy: keep base64 dataUrl
+            return { name: f.name, type: f.type, dataUrl: f.dataUrl };
+        });
+
         const submission = {
             escrowId,
             submitter,
             text: text || '',
-            files: files || [], // Array of { name, dataUrl, type }
+            files: processedFiles,
             submittedAt: new Date().toISOString(),
         };
 
-        // Upload JSON to Pinata
+        // Upload submission JSON to Pinata
         const pinataRes = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
             method: 'POST',
             headers: {
