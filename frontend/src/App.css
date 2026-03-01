@@ -1618,6 +1618,11 @@ nav button.active::before {
   display: none;
 }
 
+/* Hide sidebar connect button — center prompt is the only connect wallet */
+.wallet-card>.connect-btn {
+  display: none;
+}
+
 .mobile-wallet-info {
   display: flex;
   align-items: center;
@@ -1708,13 +1713,6 @@ nav button.active::before {
   }
 
   .mobile-wallet-bar .connect-btn {
-    width: 100%;
-    padding: 0.65rem;
-    font-size: 0.85rem;
-  }
-
-  /* Hide the content area connect prompt on mobile (redundant with mobile wallet bar) */
-  .connect-prompt {
     display: none;
   }
 
